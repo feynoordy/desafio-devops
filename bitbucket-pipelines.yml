@@ -1,0 +1,31 @@
+image: mcr.microsoft.com/dotnet/sdk:8.0
+
+pipelines:
+  branches:
+    main:
+      - step:
+          name: Build e Testes
+          script:
+            - dotnet restore
+            - dotnet build --configuration Release
+
+      - step:
+          name: Build Docker & Push para AWS ECR
+          image: atlassian/default-image:4
+          services:
+            - docker
+          script:
+            - pipe: atlassian/aws-ecr-push-image:2.2.0
+              variables:
+                AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+                AWS_DEFAULT_REGION: 'sa-east-1'
+                IMAGE_NAME: 'dotnet-core-app'
+                TAGS: 'latest $BITBUCKET_COMMIT'
+
+      - step:
+          name: Deploy no AWS ECS Fargate
+          image: atlassian/default-image:4
+          script:
+            - pip3 install awscli
+            - aws ecs update-service --cluster dotnet-cluster --service dotnet-fargate-service --force-new-deployment --region sa-east-1
