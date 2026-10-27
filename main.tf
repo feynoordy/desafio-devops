@@ -12,6 +12,17 @@ provider "aws" {
   region = "sa-east-1"
 }
 
+# Buscar a AMI oficial do Ubuntu mais recente em sa-east-1
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+}
+
 resource "aws_ecr_repository" "app_repo" {
   name                 = "dotnet-core-app"
   image_tag_mutability = "MUTABLE"
@@ -69,6 +80,27 @@ resource "aws_security_group" "app_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+# IAM Role para Execucao do ECS Task
+resource "aws_iam_role" "ecs_execution_role" {
+  name = "ecs_task_execution_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
+  role       = aws_iam_role.ecs_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 resource "aws_wafv2_web_acl" "waf" {
@@ -160,6 +192,7 @@ resource "aws_ecs_task_definition" "app" {
   requires_compatibilities = ["FARGATE"]
   cpu                      = "256"
   memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
 
   container_definitions = jsonencode([{
     name      = "dotnet-app"
@@ -192,7 +225,7 @@ resource "aws_ecs_service" "fargate_service" {
 }
 
 resource "aws_instance" "ec2_app" {
-  ami                    = "ami-0c55b159cbfafe1f0"
+  ami                    = data.aws_ami.ubuntu.id
   instance_type          = "t3.micro"
   subnet_id              = module.vpc.private_subnets[0]
   vpc_security_group_ids = [aws_security_group.app_sg.id]
